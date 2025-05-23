@@ -57,7 +57,7 @@ The final tuned model (e.g., a RandomForestClassifier or GradientBoostingClassif
 -   Python 3.7+
 -   pip (Python package installer)
 -   Git
--   Docker (for containerization, see Section 9)
+-   Docker (for containerization, see Section 8)
 
 ### Installation
 1.  Clone the repository:
@@ -71,10 +71,11 @@ The final tuned model (e.g., a RandomForestClassifier or GradientBoostingClassif
     ```
 3.  Install the required Python packages:
     ```bash
-    pip install -r requirements.txt
+    pip install -r requirements.txt 
+    # Ploomber is included in requirements.txt
     ```
 
-### Running the Pipelines
+### Running the Pipelines Manually
 The notebooks should ideally be run in the following sequence:
 
 1.  **Feature Pipeline**:
@@ -97,83 +98,34 @@ The notebooks should ideally be run in the following sequence:
     -   Run the Jupyter Notebook: `jupyter notebook batch_inference.ipynb`
     -   This will load the trained model and generate `predictions.csv` in the `inference_pipeline` directory using `bank-features-selected.csv` as input.
 
-## 7. Automation with GitHub Actions (Conceptual)
+For automated execution, see the "Automation with GitHub Actions" section below. For pipeline orchestration, see "Orchestration with Ploomber".
+
+## 7. Automation with GitHub Actions
 
 ### 7.1. Objective of Automation
-The primary objective is to automate the execution of the feature, training, and inference pipelines. This automation can be triggered by scheduled events (e.g., daily or weekly) or specific repository events (e.g., a push to the main branch), ensuring that the data is processed, models are retrained, and predictions are generated consistently and without manual intervention.
+This project implements GitHub Actions to automate the execution of the feature engineering and model training pipelines. This automation can be triggered manually or by pushes to the main branch, ensuring that data artifacts and models are consistently regenerated.
 
-### 7.2. Tools
--   **GitHub Actions**: For defining and running the automated workflows.
+### 7.2. Implemented Workflows
+The following workflows are defined in the `.github/workflows/` directory:
 
-### 7.3. Conceptual Workflow Files
-We would define separate YAML files in the `.github/workflows/` directory for each pipeline.
+-   **Feature Engineering Pipeline (`.github/workflows/feature_pipeline.yml`)**:
+    -   **Purpose**: Automates the execution of the `feature_pipeline/feature_engineering.ipynb` notebook using `papermill`. It generates key data artifacts: `bank-features-selected.csv` (selected features for model training) and `selected_feature_names.json` (list of these feature names). The executed notebook (`executed_feature_engineering.ipynb`) is also saved. These generated files are then committed back to the repository.
+    -   **Triggers**:
+        -   Manually via `workflow_dispatch`.
+        -   On push to the `main` branch if changes are detected in `feature_pipeline/**`, `requirements.txt`, or the workflow file itself (`.github/workflows/feature_pipeline.yml`).
 
-#### 7.3.1. `feature_pipeline.yml`
--   **Trigger**:
-    -   Scheduled (e.g., daily or weekly via `on: schedule:`).
-    -   On push to the `main` branch, specifically changes within the `feature_pipeline/` directory or related data source configurations.
--   **Jobs**:
-    1.  **Setup Environment**:
-        -   Checkout the repository code.
-        -   Set up a Python environment (e.g., using `actions/setup-python@v4`).
-        -   Install dependencies from `requirements.txt`.
-    2.  **Run Feature Engineering Notebook**:
-        -   Execute the `feature_pipeline/feature_engineering.ipynb` notebook. This can be done using `papermill` to parameterize the notebook if needed, or by converting the notebook to a Python script (`.py`) and running it directly.
-    3.  **Persist Outputs**:
-        -   The primary outputs (`bank-features-selected.csv`, `selected_feature_names.json`, `bank-full-processed.csv`) need to be persisted.
-        -   **Option 1 (Simple)**: Commit the generated files back to the Git repository. Requires `GITHUB_TOKEN` with write permissions.
-        -   **Option 2 (Advanced/Recommended)**: Upload the artifacts to a dedicated feature store (e.g., Hopsworks), a cloud storage solution (e.g., AWS S3, Azure Blob Storage, Google Cloud Storage), or a versioned data store. This is more robust for larger datasets and better MLOps practice.
-    4.  **Trigger Downstream (Optional)**:
-        -   Could be configured to trigger the `inference_pipeline.yml` if new features are generated and predictions are needed immediately.
-        -   Could also trigger the `training_pipeline.yml` if the feature changes are significant enough to warrant retraining (this logic would be more complex).
+-   **Model Training Pipeline (`.github/workflows/training_pipeline.yml`)**:
+    -   **Purpose**: Automates the execution of the `training_pipeline/model_training.ipynb` notebook using `papermill`. This pipeline trains the model, generates the `best_tuned_model.joblib` artifact, and logs experiment data (parameters, metrics, artifacts) to a local MLflow tracking instance (saved in the `mlruns/` directory). The `best_tuned_model.joblib`, the executed notebook (`executed_model_training.ipynb`), and the `mlruns/` directory are then committed back to the repository.
+    -   **Triggers**:
+        -   Manually via `workflow_dispatch`.
+        -   On push to the `main` branch if changes are detected in `training_pipeline/**`, `requirements.txt`, the workflow file itself (`.github/workflows/training_pipeline.yml`), or importantly, if the key input `feature_pipeline/bank-features-selected.csv` or `feature_pipeline/selected_feature_names.json` are updated (indicating new features are available for training).
 
-#### 7.3.2. `training_pipeline.yml`
--   **Trigger**:
-    -   Scheduled (e.g., weekly or monthly).
-    -   Manually triggered using `workflow_dispatch` for on-demand retraining.
-    -   Potentially triggered after significant updates from the feature pipeline.
--   **Jobs**:
-    1.  **Setup Environment**:
-        -   Checkout repository code.
-        -   Set up Python environment and install dependencies.
-    2.  **Configure MLflow**:
-        -   If using a remote MLflow tracking server, configure environment variables for `MLFLOW_TRACKING_URI` and any necessary authentication tokens (e.g., `DATABRICKS_HOST`, `DATABRICKS_TOKEN` if using Databricks-hosted MLflow). These should be stored as GitHub Secrets.
-    3.  **Run Model Training Notebook**:
-        -   Execute the `training_pipeline/model_training.ipynb` notebook (again, using `papermill` or by converting to a script).
-    4.  **Model Registry and Persistence**:
-        -   The notebook is already designed to log the model to MLflow. Ensure the MLflow run correctly registers the model in the MLflow Model Registry, possibly promoting it to "Staging" or "Production" based on evaluation criteria (this might involve additional scripting or manual steps initially).
-        -   The `best_tuned_model.joblib` file could also be versioned using Git LFS and committed to the repository, or uploaded to a dedicated model store (like S3, an MLflow artifact store, or a dedicated model registry service).
-
-#### 7.3.3. `inference_pipeline.yml`
--   **Trigger**:
-    -   Scheduled (e.g., daily, typically after the feature pipeline is expected to complete).
-    -   On registration of a new "Production" model in the MLflow Model Registry (requires webhook setup or a polling mechanism, which is more advanced).
-    -   Manually triggered via `workflow_dispatch`.
--   **Jobs**:
-    1.  **Setup Environment**:
-        -   Checkout repository code.
-        -   Set up Python environment and install dependencies.
-    2.  **Retrieve Data and Model**:
-        -   Download the latest `bank-features-selected.csv`. This could be from the Git repository (if committed by `feature_pipeline.yml`) or from the feature store/cloud storage.
-        -   Download/load the latest "Production" version of the trained model from the MLflow Model Registry (using MLflow client APIs) or other model store.
-    3.  **Run Batch Inference Notebook**:
-        -   Execute the `inference_pipeline/batch_inference.ipynb` notebook (using `papermill` or by converting to a script).
-    4.  **Save Predictions**:
-        -   The `predictions.csv` file needs to be saved.
-        -   **Option 1 (Simple)**: Commit `predictions.csv` back to the repository.
-        -   **Option 2 (Advanced/Recommended)**: Upload the predictions to a database, data warehouse, S3 bucket, or another system where downstream services or business intelligence tools can consume them.
-
-### 7.4. Secrets Management
--   **`GITHUB_TOKEN`**: Automatically available in GitHub Actions. It's used for actions like checking out code. If workflows need to commit files back to the repository, the token might need `contents: write` permissions (configurable in the workflow file or repository settings).
--   **Cloud Credentials**: Any credentials for accessing external services like a feature store (Hopsworks), MLflow tracking server (if remote and secured), cloud storage (AWS S3, Azure Blob, GCS), or databases should be stored as encrypted secrets in the GitHub repository settings (`Settings -> Secrets and variables -> Actions`). These secrets are then accessed in the workflow files as environment variables (e.g., `secrets.AWS_ACCESS_KEY_ID`).
-
-### 7.5. Converting Notebooks for Automation
-While Jupyter notebooks are excellent for development and exploration, they are not always ideal for robust, unattended automation. For CI/CD pipelines:
--   **Convert to Python Scripts (`.py`)**: Notebooks can be converted to Python scripts using `jupyter nbconvert --to script my_notebook.ipynb`. This makes them easier to execute, test, and debug in an automated environment.
--   **Use `papermill`**: `papermill` allows you to execute notebooks programmatically, parameterize them (e.g., pass different input/output paths or configuration settings), and save the executed notebook with outputs for inspection. This can be a good middle ground, preserving the notebook format while enabling automation.
--   **Modularize Code**: Refactor common functions or complex logic from notebooks into Python modules (`.py` files) that can be imported and tested independently, then called from simpler script or notebook wrappers in the automation pipeline.
-
-This conceptual outline provides a roadmap for establishing a CI/CD system for the MLOps pipelines using GitHub Actions.
+### 7.3. Usage and Monitoring
+-   **Monitoring**: The status and logs of these automated workflows can be monitored from the "Actions" tab of the GitHub repository.
+-   **Manual Triggers**: Both workflows can be manually triggered from the "Actions" tab by selecting the desired workflow and clicking "Run workflow".
+-   **Outputs**: When the workflows run, they commit their outputs (generated data files, model artifacts, executed notebooks, and the `mlruns` directory) back to the Git repository. This provides versioning for these artifacts directly within the repository.
+-   **Notebook Execution**: `papermill` is used to execute the Jupyter notebooks in a non-interactive way, allowing for parameterization (though not heavily used in the current setup) and saving the executed notebook with its outputs for inspection.
+-   **MLflow Data**: For simplicity, the `training_pipeline.yml` workflow commits the `mlruns` directory (containing local MLflow experiment data) back to the repository. For more robust, collaborative, or production environments, configuring a remote MLflow tracking server is highly recommended.
 
 ## 8. Model Containerization with Docker
 
@@ -273,66 +225,123 @@ Once the image is tested and working, you can upload it to Docker Hub (or anothe
 2.  Tag your image: `docker tag bank-marketing-service yourusername/bank-marketing-service:latest` (replace `yourusername`)
 3.  Push the image: `docker push yourusername/bank-marketing-service:latest`
 
-## 9. Orchestration with Ploomber (Conceptual)
+## 9. Orchestration with Ploomber
 
-### 9.1. Introduction to Ploomber
-Ploomber is a pipeline orchestration tool that helps in developing, building, and deploying data pipelines. It allows users to define their pipeline as a series of tasks (which can be notebooks, Python scripts, SQL scripts, etc.) and manages the dependencies and execution flow between them. This is particularly useful for creating reproducible and maintainable machine learning workflows.
+### 9.1. `pipeline.yaml` Definition
+Ploomber is used to define and orchestrate the sequence of tasks in this project. The orchestration logic is captured in the `pipeline.yaml` file at the root of the `bank_marketing_project` directory:
 
-### 9.2. `pipeline.yaml` Structure (Conceptual)
-Ploomber uses a `pipeline.yaml` file at the root of the project to define the Directed Acyclic Graph (DAG) of tasks. Each task specifies its source code and the products it generates.
+```yaml
+# Ploomber pipeline example for orchestrating the bank marketing project notebooks
 
-Conceptually, for this project, the `pipeline.yaml` would define tasks like:
+# Optional: Configure meta settings if needed, like default paths for products
+# meta:
+#   source_loader:
+#     kind: NotebookSourceLoader
+#   product_default_class: File # Could be File or SQLRelation etc.
 
--   **Feature Engineering Task (`feature_eng`)**:
-    -   **Source**: `feature_pipeline/feature_engineering.ipynb` (or a converted `feature_engineering.py` script).
-    -   **Product**:
-        -   `feature_pipeline/bank-features-selected.csv`
-        -   `feature_pipeline/selected_feature_names.json`
-        -   (Optionally, `feature_pipeline/bank-full-processed.csv` if needed for other analyses).
+tasks:
+  - source: feature_pipeline/feature_engineering.ipynb
+    name: feature-engineering # Optional, Ploomber can infer from source name
+    product:
+      # Ploomber typically expects one main product per task for chaining,
+      # but a task can produce multiple files.
+      # We list them here for clarity and potential checking.
+      # The primary output that might be used by a downstream task is 'data'.
+      data: feature_pipeline/bank-features-selected.csv
+      selected_features_json: feature_pipeline/selected_feature_names.json
+      executed_notebook: feature_pipeline/executed_feature_engineering_ploomber.ipynb # Ploomber can save executed notebook
 
--   **Model Training Task (`train_model`)**:
-    -   **Source**: `training_pipeline/model_training.ipynb` (or `model_training.py`).
-    -   **Upstream**: Depends on the `feature_eng` task (specifically, on the creation of `bank-features-selected.csv`).
-    -   **Product**:
-        -   `training_pipeline/best_tuned_model.joblib`
-        -   (MLflow experiment tracking is a side effect of this task, not a direct Ploomber product, but crucial).
+  - source: training_pipeline/model_training.ipynb
+    name: model-training
+    # Ploomber can also manage MLflow logging implicitly if configured,
+    # or the notebook handles it as it does now.
+    product:
+      model: training_pipeline/best_tuned_model.joblib
+      executed_notebook: training_pipeline/executed_model_training_ploomber.ipynb
+    upstream:
+      # This task depends on the features generated by the feature-engineering task.
+      # Ploomber will pass the 'data' product from 'feature-engineering'
+      # as an 'upstream' variable to this notebook if the notebook expects it.
+      # The notebook 'model_training.ipynb' needs to be able to accept 'upstream["feature-engineering"]["data"]'
+      # or simply know the path to 'bank-features-selected.csv'.
+      # For simplicity, this example assumes the notebook knows the path.
+      # If parameter passing is desired, the notebook needs a 'parameters' cell
+      # and Ploomber injects 'upstream' and 'product' variables.
+      - feature-engineering # Depends on the 'feature-engineering' task by name
 
--   **Batch Inference Task (`batch_predict`)** (Optional, as Ploomber primarily orchestrates training; inference might be separate or triggered by other means):
-    -   **Source**: `inference_pipeline/batch_inference.ipynb` (or `batch_inference.py`).
-    -   **Upstream**:
-        -   Depends on `train_model` for `best_tuned_model.joblib`.
-        -   Depends on `feature_eng` for `bank-features-selected.csv` (acting as new batch data in this project's example). In a real-world scenario, the input data for inference would likely come from a different source or be a parameter.
-    -   **Product**: `inference_pipeline/predictions.csv`.
+  # Optional: Batch Inference Task
+  # This task would typically run on new data, not directly chained here unless
+  # the feature_engineering task is parameterized to run on different raw data inputs.
+  # For now, let's include it to show how it would look.
+  - source: inference_pipeline/batch_inference.ipynb
+    name: batch-inference
+    product:
+      predictions: inference_pipeline/predictions_ploomber.csv
+      executed_notebook: inference_pipeline/executed_batch_inference_ploomber.ipynb
+    upstream:
+      # Depends on the model from 'model-training' and potentially new features.
+      # The notebook 'batch_inference.ipynb' would need to be aware of the upstream model path.
+      - model-training
+      # If 'feature-engineering' produced a general set of features for inference
+      # (not just training split), it could be an upstream dependency too.
+      # For this example, we assume the inference notebook loads features independently
+      # or uses a version of features aligned with the trained model.
 
--   **(Advanced) Model Deployment Task (`deploy_model`)**:
-    -   This is a conceptual task that could be triggered after `train_model`.
-    -   **Source**: Could be a Python script or a shell script.
-    -   **Upstream**: Depends on `train_model`.
-    -   **Actions (not direct Ploomber products but effects of the task)**:
-        -   Build the Docker image using the `Dockerfile` (e.g., by running `docker build ...`).
-        -   Push the built image to a container registry (e.g., Docker Hub, AWS ECR, Google GCR).
-        -   Deploy or update the service running the FastAPI application (e.g., on Kubernetes, or by restarting a Docker container with the new image).
+# To make notebooks Ploomber-aware for parameter injection (optional but powerful):
+# 1. Add a cell with the tag 'parameters' to your input notebooks.
+# 2. Ploomber will inject 'upstream' and 'product' variables into that cell if they exist.
+# Example 'parameters' cell in model_training.ipynb:
+# upstream = None # Will be injected by Ploomber
+# product = None # Will be injected by Ploomber
+# input_features_path = upstream['feature-engineering']['data'] if upstream else 'feature_pipeline/bank-features-selected.csv'
+# output_model_path = product['model'] if product else 'training_pipeline/best_tuned_model.joblib'
 
-### 9.3. Benefits of Using Ploomber
--   **Reproducibility**: Ensures that pipeline runs are consistent and can be exactly reproduced.
--   **Clear Dependency Management**: Explicitly defines the relationships between tasks, making the pipeline structure easy to understand and maintain.
--   **Incremental Builds**: Ploomber can skip tasks whose inputs haven't changed, saving computation time.
--   **Easier Development & Testing**: Allows for developing and testing individual pipeline components (tasks) in isolation.
--   **Parameterization**: Supports parameterizing pipeline runs, allowing for different configurations without changing the code (e.g., different feature selection parameters, model hyperparameters).
--   **Integration with CI/CD**: Ploomber pipelines can be easily integrated into CI/CD systems like GitHub Actions for automated execution, testing, and deployment.
--   **Interactive Development**: `ploomber plot` can visualize the pipeline, and `ploomber build --interactive` can help debug.
+# Without parameter injection, notebooks must rely on pre-defined relative paths,
+# which is how they are currently set up. This pipeline.yaml will still help in
+# orchestrating the order of execution.
+```
 
-### 9.4. FastAPI Serving
-It's important to note that Ploomber's primary role here would be to orchestrate the *creation, training, and versioning of the model artifact* (`best_tuned_model.joblib`) that is then served by the FastAPI application. The FastAPI application (defined in `app/main.py` and containerized using the `Dockerfile`) is the actual model deployment mechanism for handling online/real-time prediction requests. Ploomber ensures that the model served by FastAPI is the result of a well-defined, reproducible, and version-controlled pipeline.
+### 9.2. Usage
+Ploomber helps manage the execution order and dependencies of the notebooks.
+
+-   **Installation**: Ploomber should already be included in `requirements.txt`. If installing manually:
+    ```bash
+    pip install ploomber
+    ```
+-   **Running the Pipeline**: To execute the entire pipeline as defined in `pipeline.yaml`:
+    ```bash
+    ploomber build
+    ```
+-   **Visualizing the Pipeline**: To generate a plot of the pipeline's Directed Acyclic Graph (DAG):
+    ```bash
+    ploomber plot
+    ```
+    This will create a `pipeline.html` (or `.png` if graphviz is installed) file showing the task dependencies.
+-   **Checking Task Status**: To see the current status of tasks (e.g., if they need to be run):
+    ```bash
+    ploomber status
+    ```
+-   **Forcing Task Re-execution**: To force a specific task and its downstream dependencies to re-run, even if Ploomber thinks they are up-to-date:
+    ```bash
+    ploomber build --force <task-name>
+    ```
+    For example:
+    ```bash
+    ploomber build --force feature-engineering
+    ```
+-   **Parameterization Note**: The provided `pipeline.yaml` orchestrates the existing notebooks based on their current fixed-path dependencies. For more dynamic execution and parameter passing directly from Ploomber (e.g., passing `upstream['feature-engineering']['data']` to the training notebook), the notebooks can be modified by adding a cell tagged 'parameters'. Comments within `pipeline.yaml` provide hints on this.
 
 ## 10. Future Work / Next Steps
--   **Full Automation with CI/CD**: Implement GitHub Actions or a similar CI/CD tool to automate the execution of the pipelines upon code changes or on a schedule. (See conceptual outline in Section 8).
+-   **CI/CD Enhancements**:
+    -   Implement an automated inference pipeline workflow in GitHub Actions.
+    -   Explore strategies for more advanced artifact management (e.g., using a dedicated feature store like Hopsworks, or cloud storage for data/models instead of committing directly to Git, especially for larger artifacts).
+    -   Integrate a remote MLflow tracking server for more robust experiment management.
 -   **Feature Store Integration**: Utilize a feature store like Hopsworks for centralized feature management, versioning, and serving, ensuring consistency between training and inference.
--   **Containerization and API Deployment**:
-    -   Containerize the inference pipeline using Docker. (See Section 9).
-    -   Deploy the model as a REST API service using FastAPI for real-time (or micro-batch) predictions.
--   **Workflow Orchestration**: Use a workflow orchestrator like Ploomber or Apache Airflow to manage the dependencies and execution of the different pipeline stages. (Ploomber concept covered in Section 10).
--   **Advanced Model Monitoring**: Implement more sophisticated model monitoring for data drift, concept drift, and performance degradation over time.
+-   **API Deployment Enhancements**:
+    -   Further refine the FastAPI application with more comprehensive error handling, logging, and potentially input validation based on dynamic feature types if necessary.
+    -   Explore deployment to managed services (e.g., AWS SageMaker, Azure ML, Google Vertex AI, or Kubernetes).
+-   **Workflow Orchestration**: Fully implement Ploomber or Apache Airflow to manage the dependencies and execution of the different pipeline stages. (Ploomber integration initiated in Section 9).
+-   **Advanced Model Monitoring**: Implement sophisticated model monitoring for data drift, concept drift, and performance degradation over time using tools like Evidently AI or Grafana.
 -   **Scalability**: Explore options for scaling data processing (e.g., using Spark) and model training/inference if the dataset size grows significantly.
 
 ---
