@@ -1,7 +1,7 @@
 name: Feature Engineering Pipeline
 
 on:
-  workflow_dispatch: # Manual trigger
+  workflow_dispatch: # Disparador manual
   push:
     branches:
       - main
@@ -20,25 +20,25 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v3
         with:
-          python-version: '3.9' # Should match project's python version
+          python-version: '3.9' # Debe coincidir con la versión de python del proyecto
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install papermill # Ensure papermill is installed
+          pip install papermill # Asegurar que papermill esté instalado
 
       - name: Create output directory if it doesn't exist
-        run: mkdir -p feature_pipeline # Ensure the output directory exists
+        run: mkdir -p feature_pipeline # Asegurar que el directorio de salida exista
 
       - name: Run Feature Engineering Notebook
         run: |
           papermill \
             feature_pipeline/feature_engineering.ipynb \
             feature_pipeline/executed_feature_engineering.ipynb \
-            -p timestamp $(date +%s) # Example of passing a parameter, can be removed if not needed by notebook
-        # The notebook itself saves 'bank-features-selected.csv' and 'selected_feature_names.json'
-        # to the 'feature_pipeline/' directory.
+            -p timestamp $(date +%s) # Ejemplo de pasar un parámetro, puede eliminarse si el cuaderno no lo necesita
+        # El cuaderno mismo guarda 'bank-features-selected.csv' y 'selected_feature_names.json'
+        # en el directorio 'feature_pipeline/'.
 
       - name: Commit and push outputs
         run: |
@@ -46,8 +46,8 @@ jobs:
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add feature_pipeline/bank-features-selected.csv
           git add feature_pipeline/selected_feature_names.json
-          git add feature_pipeline/executed_feature_engineering.ipynb # Commit the executed notebook
-          # Check if there are changes to commit
+          git add feature_pipeline/executed_feature_engineering.ipynb # Confirmar el cuaderno ejecutado
+          # Verificar si hay cambios para confirmar
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else

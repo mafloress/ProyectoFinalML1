@@ -1,42 +1,42 @@
-# Use an official Python runtime as a parent image
+# Usar un runtime oficial de Python como imagen base
 FROM python:3.9-slim
 
-# Set environment variables
+# Establecer variables de entorno
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
-# Set the working directory in the container
+# Establecer el directorio de trabajo en el contenedor
 WORKDIR /app
 
-# Install system dependencies required for some ML libraries if needed
+# Instalar dependencias del sistema requeridas por algunas bibliotecas de ML si es necesario
 # RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
-# For this project, assuming scikit-learn and pandas slim builds don't need extensive build tools.
+# Para este proyecto, se asume que las compilaciones delgadas de scikit-learn y pandas no necesitan herramientas de compilación extensas.
 
-# Copy the requirements file into the container at /app
+# Copiar el archivo de requerimientos al contenedor en /app
 COPY requirements.txt .
 
-# Install Python dependencies
+# Instalar dependencias de Python
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the local 'app' directory contents into the container at /app/app
-# This means main.py will be at /app/app/main.py
+# Copiar el contenido del directorio local 'app' al contenedor en /app/app
+# Esto significa que main.py estará en /app/app/main.py
 COPY app/ /app/app/
 
-# Copy the trained model and feature list into the container
-# Adjust paths to ensure they are correctly located for main.py
-# main.py expects MODEL_DIR to be /app, and then paths like training_pipeline/model.joblib
-# So, we place these directories directly under /app
+# Copiar el modelo entrenado y la lista de características al contenedor
+# Ajustar rutas para asegurar que estén ubicadas correctamente para main.py
+# main.py espera que MODEL_DIR sea /app, y luego rutas como training_pipeline/model.joblib
+# Así que, colocamos estos directorios directamente bajo /app
 COPY training_pipeline/best_tuned_model.joblib /app/training_pipeline/
 COPY feature_pipeline/selected_feature_names.json /app/feature_pipeline/
 
-# Expose port 8000 to the outside world
+# Exponer el puerto 8000 al mundo exterior
 EXPOSE 8000
 
-# Define the command to run your application
-# It will look for main.py inside the 'app' module/directory copied earlier.
-# The MODEL_DIR environment variable in main.py will default to '.', which is /app in this WORKDIR context.
-# So, MODEL_PATH will be ./training_pipeline/best_tuned_model.joblib -> /app/training_pipeline/best_tuned_model.joblib
-# And FEATURES_PATH will be ./feature_pipeline/selected_feature_names.json -> /app/feature_pipeline/selected_feature_names.json
-# This aligns with the COPY commands.
+# Definir el comando para ejecutar tu aplicación
+# Buscará main.py dentro del módulo/directorio 'app' copiado anteriormente.
+# La variable de entorno MODEL_DIR en main.py tomará por defecto '.', que es /app en este contexto de WORKDIR.
+# Entonces, MODEL_PATH será ./training_pipeline/best_tuned_model.joblib -> /app/training_pipeline/best_tuned_model.joblib
+# Y FEATURES_PATH será ./feature_pipeline/selected_feature_names.json -> /app/feature_pipeline/selected_feature_names.json
+# Esto se alinea con los comandos COPY.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

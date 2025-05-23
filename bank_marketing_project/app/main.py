@@ -5,134 +5,148 @@ import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, conlist
-from typing import List, Dict, Any # Union for Pydantic types if needed
+from typing import List, Dict, Any # Union para tipos Pydantic si es necesario
 
-# --- Configuration & Model Loading ---
-# Paths are relative to the location of main.py when running inside the Docker container
-# The Dockerfile will place these files correctly.
-MODEL_DIR = os.getenv("MODEL_DIR", ".") # Default to current dir if not set, but Dockerfile will structure it
+# --- Configuración y Carga del Modelo ---
+# Las rutas son relativas a la ubicación de main.py cuando se ejecuta dentro del contenedor Docker
+# El Dockerfile colocará estos archivos correctamente.
+MODEL_DIR = os.getenv("MODEL_DIR", ".") # Valor por defecto al directorio actual si no está configurado, pero Dockerfile lo estructurará
 MODEL_PATH = os.path.join(MODEL_DIR, "training_pipeline/best_tuned_model.joblib")
 FEATURES_PATH = os.path.join(MODEL_DIR, "feature_pipeline/selected_feature_names.json")
 
 model = None
 selected_features = []
 
-# --- Pydantic Models ---
-# Dynamically create the Pydantic model based on selected_features
-# This is advanced and might be overly complex for this stage.
-# For now, we'll define a more generic input model expecting a list of dictionaries.
+# --- Modelos Pydantic ---
+# Crear dinámicamente el modelo Pydantic basado en selected_features
+# Esto es avanzado y podría ser demasiado complejo para esta etapa.
+# Por ahora, definiremos un modelo de entrada más genérico que espera una lista de diccionarios.
 class FeatureDict(BaseModel):
-    # This will allow any feature name as a key, with float values.
-    # In a more robust scenario, you'd explicitly define fields if known and static,
-    # or use create_model from pydantic.tools if features are truly dynamic AND need strict validation.
-    # For this exercise, a simple Dict[str, float] per instance is practical.
-    __root__: Dict[str, float] # Allows arbitrary key-value pairs where keys are strings, values are floats
+    # Esto permitirá cualquier nombre de característica como clave, con valores flotantes.
+    # En un escenario más robusto, definirías explícitamente los campos si son conocidos y estáticos,
+    # o usarías create_model de pydantic.tools si las características son verdaderamente dinámicas Y necesitan validación estricta.
+    # Para este ejercicio, un simple Dict[str, float] por instancia es práctico.
+    __root__: Dict[str, float] # Permite pares clave-valor arbitrarios donde las claves son cadenas y los valores son flotantes
 
 class PredictionInput(BaseModel):
-    instances: conlist(item_type=Dict[str, Any], min_items=1) # List of feature dictionaries
+    instances: conlist(item_type=Dict[str, Any], min_items=1) # Lista de diccionarios de características
 
 class PredictionOutput(BaseModel):
     predictions: List[Dict[str, Any]]
 
-# --- FastAPI App Initialization ---
+# --- Inicialización de la App FastAPI ---
 app = FastAPI(
-    title="Bank Marketing Prediction API",
-    description="API to predict term deposit subscriptions using a pre-trained model.",
+    title="API de Predicción de Marketing Bancario",
+    description="API para predecir suscripciones a depósitos a plazo utilizando un modelo preentrenado.",
     version="0.1.0"
 )
 
 @app.on_event("startup")
 async def load_model_and_features():
+    """
+    Carga el modelo entrenado y la lista de características seleccionadas durante el inicio de la aplicación.
+    Estos artefactos son esenciales para que el endpoint de predicción funcione correctamente.
+    Lanza RuntimeError si los archivos necesarios no se encuentran o no se pueden cargar.
+    """
     global model, selected_features
     if not os.path.exists(MODEL_PATH):
-        raise RuntimeError(f"Model file not found at {MODEL_PATH}")
+        raise RuntimeError(f"Archivo de modelo no encontrado en {MODEL_PATH}")
     if not os.path.exists(FEATURES_PATH):
-        raise RuntimeError(f"Features file not found at {FEATURES_PATH}")
+        raise RuntimeError(f"Archivo de características no encontrado en {FEATURES_PATH}")
 
     try:
         model = joblib.load(MODEL_PATH)
-        print(f"Model loaded successfully from {MODEL_PATH}")
+        print(f"Modelo cargado exitosamente desde {MODEL_PATH}")
     except Exception as e:
-        print(f"Error loading model: {e}")
-        raise RuntimeError(f"Could not load model: {e}")
+        print(f"Error cargando el modelo: {e}")
+        raise RuntimeError(f"No se pudo cargar el modelo: {e}")
 
     try:
         with open(FEATURES_PATH, 'r') as f:
             selected_features = json.load(f)
-        print(f"Selected features loaded successfully from {FEATURES_PATH}. ({len(selected_features)} features)")
+        print(f"Características seleccionadas cargadas exitosamente desde {FEATURES_PATH}. ({len(selected_features)} características)")
         if not selected_features:
-            raise ValueError("Selected features list is empty.")
+            raise ValueError("La lista de características seleccionadas está vacía.")
     except Exception as e:
-        print(f"Error loading features list: {e}")
-        raise RuntimeError(f"Could not load features list: {e}")
+        print(f"Error cargando la lista de características: {e}")
+        raise RuntimeError(f"No se pudo cargar la lista de características: {e}")
 
-# --- API Endpoints ---
+# --- Endpoints de la API ---
 @app.get("/")
 async def read_root():
-    return {"message": "Welcome to the Bank Marketing Prediction API. Use the /predict endpoint to make predictions."}
+    """
+    Endpoint raíz para verificar que la API está en funcionamiento.
+    """
+    return {"message": "Bienvenido a la API de Predicción de Marketing Bancario. Usa el endpoint /predict para realizar predicciones."}
 
 @app.post("/predict/", response_model=PredictionOutput)
 async def predict(payload: PredictionInput):
+    """
+    Endpoint para realizar predicciones.
+    Recibe una lista de instancias (diccionarios de características),
+    realiza predicciones utilizando el modelo cargado y devuelve
+    las etiquetas predichas y las probabilidades.
+    """
     global model, selected_features
 
     if model is None:
-        raise HTTPException(status_code=503, detail="Model not loaded. Please check server logs.")
+        raise HTTPException(status_code=503, detail="Modelo no cargado. Por favor, revisa los logs del servidor.")
     if not selected_features:
-        raise HTTPException(status_code=503, detail="Feature list not loaded or empty. Please check server logs.")
+        raise HTTPException(status_code=503, detail="Lista de características no cargada o vacía. Por favor, revisa los logs del servidor.")
 
     input_data_list = payload.instances
     
     try:
-        # Convert list of dicts to DataFrame
-        # Ensure all required features are present and in the correct order
+        # Convertir lista de diccionarios a DataFrame
+        # Asegurar que todas las características requeridas estén presentes y en el orden correcto
         df_list = []
         for i, instance in enumerate(input_data_list):
-            # Check for missing features
+            # Verificar características faltantes
             missing_instance_features = set(selected_features) - set(instance.keys())
             if missing_instance_features:
                 raise HTTPException(
                     status_code=400, 
-                    detail=f"Missing features in instance {i}: {missing_instance_features}. Expected: {selected_features}"
+                    detail=f"Características faltantes en la instancia {i}: {missing_instance_features}. Esperadas: {selected_features}"
                 )
             
-            # Check for extra features (optional, but good for strictness)
+            # Verificar características adicionales (opcional, pero bueno para la rigurosidad)
             extra_instance_features = set(instance.keys()) - set(selected_features)
             if extra_instance_features:
-                 # For this exercise, we'll ignore extra features if all selected_features are present.
-                 # In a stricter setting, you might raise an error or log a warning.
-                 # print(f"Warning: Extra features in instance {i} will be ignored: {extra_instance_features}")
+                 # Para este ejercicio, ignoraremos las características adicionales si todas las selected_features están presentes.
+                 # En un entorno más estricto, podrías lanzar un error o registrar una advertencia.
+                 # print(f"Advertencia: Las características adicionales en la instancia {i} serán ignoradas: {extra_instance_features}")
                  pass
 
-            # Ensure order and select only the required features
+            # Asegurar el orden y seleccionar solo las características requeridas
             ordered_instance = {feature: instance.get(feature) for feature in selected_features}
             df_list.append(ordered_instance)
 
         inference_df = pd.DataFrame(df_list, columns=selected_features)
         
-        # Data type conversion (model expects numerical, mostly float due to scaling)
-        # This assumes features in selected_features are all meant to be numeric.
-        # If not, more sophisticated type handling is needed here based on feature metadata.
+        # Conversión de tipo de datos (el modelo espera numéricos, mayormente flotantes debido al escalado)
+        # Esto asume que todas las características en selected_features deben ser numéricas.
+        # Si no, se necesita un manejo de tipos más sofisticado aquí basado en metadatos de características.
         try:
             inference_df = inference_df.astype(float)
         except ValueError as e:
             raise HTTPException(
                 status_code=400,
-                detail=f"Data type conversion error. Ensure all feature values can be converted to float. Error: {e}"
+                detail=f"Error de conversión de tipo de datos. Asegúrate de que todos los valores de las características se puedan convertir a flotantes. Error: {e}"
             )
 
-    except HTTPException: # Re-raise if it's already an HTTPException
+    except HTTPException: # Re-lanzar si ya es una HTTPException
         raise
     except Exception as e:
-        print(f"Error processing input data: {e}") # Log for server
-        raise HTTPException(status_code=400, detail=f"Error processing input data: {str(e)}")
+        print(f"Error procesando datos de entrada: {e}") # Registrar para el servidor
+        raise HTTPException(status_code=400, detail=f"Error procesando datos de entrada: {str(e)}")
 
     try:
-        # Make predictions
+        # Realizar predicciones
         pred_labels = model.predict(inference_df)
         
         pred_probas = None
         if hasattr(model, "predict_proba"):
-            pred_probas = model.predict_proba(inference_df)[:, 1] # Probability of class '1' (yes)
+            pred_probas = model.predict_proba(inference_df)[:, 1] # Probabilidad de la clase '1' (yes)
         
         results = []
         for i in range(len(pred_labels)):
@@ -144,22 +158,22 @@ async def predict(payload: PredictionInput):
         return {"predictions": results}
 
     except Exception as e:
-        print(f"Error during model prediction: {e}") # Log for server
-        # Check for common sklearn errors e.g. feature names mismatch if not caught earlier
+        print(f"Error durante la predicción del modelo: {e}") # Registrar para el servidor
+        # Verificar errores comunes de sklearn, ej. desajuste de nombres de características si no se detectó antes
         if "X has a different number of features than required by the model" in str(e) or "feature_names mismatch" in str(e):
              detail_msg = (
-                f"Feature mismatch during prediction. Model expected {len(selected_features)} features. "
-                f"Provided data has {inference_df.shape[1]} features after processing. "
-                f"Model features (first 5): {selected_features[:5]}... "
-                f"Provided features (first 5): {inference_df.columns.tolist()[:5]}..."
+                f"Desajuste de características durante la predicción. El modelo esperaba {len(selected_features)} características. "
+                f"Los datos proporcionados tienen {inference_df.shape[1]} características después del procesamiento. "
+                f"Características del modelo (primeras 5): {selected_features[:5]}... "
+                f"Características proporcionadas (primeras 5): {inference_df.columns.tolist()[:5]}..."
             )
              raise HTTPException(status_code=400, detail=detail_msg)
 
-        raise HTTPException(status_code=500, detail=f"Error during model prediction: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error durante la predicción del modelo: {str(e)}")
 
-# --- Main execution for Uvicorn (if running script directly) ---
-# This part is usually not included if Docker CMD directly calls uvicorn
-# but can be useful for local testing.
+# --- Ejecución principal para Uvicorn (si se ejecuta el script directamente) ---
+# Esta parte generalmente no se incluye si Docker CMD llama directamente a uvicorn
+# pero puede ser útil para pruebas locales.
 # if __name__ == \"__main__\":
 #     import uvicorn
 #     uvicorn.run(app, host=\"0.0.0.0\", port=8000)
