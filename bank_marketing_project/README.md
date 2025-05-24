@@ -1,16 +1,4 @@
 # Proyecto de Predicción de Marketing Bancario
-Miguel Ángel Flores Saldívar
-
-## 0. Uso de LLMs y Agentes IA
-Se utilizaron los siguientes LLMs para poder tomar ideas para tomar la base del proyecto y buscar fuentes reales de datos para el proyecto, se hizo la comparativa entre cada respuesta de cada uno y se escogío la mas ad hoc:
-- Gemini
-- Copilot
-- Deepseek
-- ChatGPT
-
-Se utilizó adicional para documentación e implementación en Github:
-- Jules Google
-
 
 ## 1. Objetivo del Proyecto
 El objetivo principal de este proyecto es analizar el conjunto de datos de Marketing Bancario para predecir si un cliente se suscribirá a un depósito a plazo. Esta tarea de machine learning está estructurada como un sistema de 3 pipelines (características, entrenamiento e inferencia) diseñado para predicciones por lotes. El proyecto busca demostrar un flujo de trabajo MLOps de extremo a extremo, incluyendo procesamiento de datos, entrenamiento de modelos, seguimiento de experimentos con MLflow e inferencia por lotes.
